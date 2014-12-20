@@ -1,0 +1,123 @@
+% select a goal that has not already been achieved
+select( State, Goals, Goal) :- member( Goal,Goals), \+ member( Goal,State).
+
+% what goals does this Action achieve?
+achieves( Action, Goal) :- adds( Action,Goals), member( Goal,Goals).
+
+% apply the action on State to give the successor state
+apply( State, Action, NewState) :- deletes( Action, DelList),
+	delete_all( State, DelList, State1),!,
+	adds( Action, AddList),
+	conc( AddList, State1, NewState).
+
+preserves( Action, Goals) :-
+    deletes( Action, Relations),
+    \+ ( member( Goal, Relations), member( Goal, Goals)).
+
+regress( Goals, Action, RegressedGoals) :- % regress Goals through Action
+    adds( Action, NewRelations),
+    delete_all( Goals, NewRelations, RestGoals),
+    can( Action, Condition),
+    addnew( Condition, RestGoals, RegressedGoals).
+
+% addnew( NewGoals, OldGoals, AllGoals)
+% AllGoals is the union of the NewGoals and OldGoals
+addnew( [], L, L).
+addnew( [Goal|_], Goals, _) :-
+    impossible(Goal, Goals),
+    !,
+    fail.
+addnew( [X|L1], L2, L3) :- % ignore duplicates
+    member( X, L2), !,
+    addnew( L1, L2, L3).
+addnew( [X|L1], L2, [X|L3]) :-
+    addnew( L1, L2, L3).
+
+s( Goals - NextAction, NewGoals - Action, Cost) :-
+    member( Goal, Goals),
+    achieves( Action, Goal),
+    can( Action, Condition),
+    cost( Action, Cost),
+    preserves( Action, Goals),
+    regress( Goals, Action, NewGoals).
+
+goal( Goals - Action) :-
+    start( State),
+    satisfied( State, Goals).
+
+h( Goals - Action, H) :-
+    start( State),
+    delete_all( Goals, State, Unsatisfied),
+    len( Unsatisfied, H). % No. of unsatisfied goals
+
+%ignore_del_heuristics( Goals - Action, H) :-
+%    start( State),
+%    delete_all( Goals, State, Unsatisfied),
+%    len( Unsatisfied, H). % No. of unsatisfied goals
+
+
+% From Bratko Fig 12.13
+bestfirst(Start, Solution) :-
+    rbfs([], [(Start, 0/0/0)], 99999, _, yes, Solution).
+rbfs(Path, [(Node, G/F/FF)], Bound, FF, no, _) :-
+    FF > Bound, !.
+rbfs(Path, [(Node, G/F/FF)|_], _, _, yes, [Node|Path]) :-
+    F = FF,
+    goal(Node).
+rbfs(_, [], _, _, never, _) :- !.
+rbfs(Path, [(Node, G/F/FF)|Ns], Bound, NewFF, Solved, Sol) :-
+    FF =< Bound,
+    findall(Child/Cost, (s(Node, Child, Cost), \+ member(Child, Path)), Children),
+    inherit(F, FF, InheritedFF),
+    succlist(G, InheritedFF, Children, SuccNodes),
+    bestff(Ns, NextBestFF),
+    min(Bound, NextBestFF, Bound2), !,
+    rbfs([Node|Path], SuccNodes, Bound2, NewFF2, Solved2, Sol),
+    continue(Path, [(Node, G/F/NewFF2)|Ns], Bound, NewFF, Solved2, Solved, Sol).
+continue(Path, [N|Ns], Bound, NewFF, never, Solved, Sol) :- !,
+    rbfs(Path, Ns, Bound, NewFF, Solved, Sol).
+continue(_,_,_,_,yes,yes,Sol).
+continue(Path, [N|Ns], Bound, NewFF, no, Solved, Sol):-
+    insert(N, Ns, NewNs), !,
+    rbfs(Path, NewNs, Bound, NewFF, Solved, Sol).
+succlist(_,_,[],[]).
+succlist(G0, InheritedFF, [Node/C|NCs], Nodes) :-
+    G is G0 + C,
+    h(Node, H),
+    F is G + H,
+    max(F, InheritedFF, FF),
+    succlist(G0, InheritedFF, NCs, Nodes2),
+    insert((Node, G/F/FF), Nodes2, Nodes).
+inherit(F, FF, FF) :-
+    FF > F, !.
+inherit(F, FF, 0).
+insert((N, G/F/FF), Nodes, [(N, G/F/FF)|Nodes]) :-
+    bestff(Nodes, FF2),
+    FF =< FF2, !.
+insert(N, [N1|Ns], [N1|Ns1]) :-
+    insert(N, Ns, Ns1).
+bestff([(N, F/G/FF)|Ns], FF).
+bestff([], 99999).
+
+%-- helpers
+max(A,B,B) :- A < B,!.
+max(A,B,A).
+min(A,B,B) :- A > B,!.
+min(A,B,A).
+
+member( X, [X|_]).
+member( X, [_|Xs]) :- member( X, Xs).
+
+len([], 0).
+len([_|Xs], M) :- len(Xs, N), M is N + 1.
+
+conc( [], Y, Y).
+conc( [X|Xs], Y, [X|Zs]) :- conc( Xs, Y, Zs).
+
+delete_all( [], _, []).
+delete_all( [X|L1], L2, Diff) :- member( X, L2),!,delete_all( L1, L2, Diff).
+delete_all( [X|L1], L2, [X|Diff]) :- delete_all( L1, L2, Diff).
+
+satisfied( _, []).
+satisfied( State, [Goal|Goals]) :- member( Goal, State),satisfied( State, Goals).
+

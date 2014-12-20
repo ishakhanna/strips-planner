@@ -1,0 +1,41 @@
+% domain
+block(a).
+block(b).
+block(c).
+
+place(1).
+place(2).
+place(3).
+place(4).
+
+object(X) :-
+    place(X);block(X).
+
+% action schema
+can(move(Block,From,To),[clear(Block),clear(To),on(Block,From)]) :-
+	block(Block),object(To),To\==Block,object(From),From\==To,Block\==From.
+adds(move(X,From,To),[on(X,To),clear(From)]).
+deletes(move(X,From,To),[on(X,From),clear(To)]).
+
+%cost(move(a,_,_), 20) :- !. % block a is heavier than the rest
+cost(move(_,_,_), 10).
+
+start([on(a, 1), on(b, 3), on(c, a), clear(b), clear(c), clear(2), clear(4)]).
+% Domain specific constraints
+impossible(on(X, X), _).
+impossible(on(X, Y), Goals) :-
+    member(clear(Y), Goals);
+    member(on(X, Y1), Goals), Y1 \== Y;
+    member(on(X1, Y), Goals), X1 \== X.
+impossible(clear(X), Goals) :-
+    member(on(_,X), Goals).
+
+% bestfirst([on(a, b), on(b, c)]-stop, Plan).
+% init_state([clear(2), clear(4), clear(b), clear(c), on(a,1), on(b,3), on(c,a)]).
+% init_state([clear(a), clear(c), on(a, 1), on(b, 2), on(c, b)]).
+% goal_state([on(a, b), on(b,c)]).
+% Start = [clear(2), clear(4), clear(b), clear(c), on(a,1), on(b,3), on(c,a)], plan(Start, [on(a, b), on(b, c)], Plan, FinState).
+% Start = [clear(2), clear(4), clear(b), clear(c), on(a,1), on(b,3), on(c,a)], plan(Start, [on(a, c), on(c, b)], Plan, FinState). works with goal protection
+% Start = [clear(a), clear(b), on(a, 1), on(b, 2)], plan(Start, [on(a, b)], Plan, FinState).
+% Start = [clear(a), clear(c), on(c, b), on(a, 1), on(b, 2)], plan(Start, [on(b, a)], Plan, FinState).
+% solve([clear(2), clear(4), clear(b), clear(c), on(a,1), on(b,3), on(c,a)], [on(a,b), on(b, c)], Plan).

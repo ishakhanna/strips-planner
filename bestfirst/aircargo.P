@@ -1,0 +1,44 @@
+% action schema
+can(load(Cargo,Plane,Airport),[at(Cargo, Airport),at(Plane, Airport)]):- cargo(Cargo), plane(Plane), airport(Airport).
+can(unload(Cargo,Plane,Airport),[in(Cargo, Plane),at(Plane, Airport)]):- cargo(Cargo), plane(Plane), airport(Airport).
+can(fly(Plane,From,To),[at(Plane, From)]):- plane(Plane), airport(From), airport(To), To\==From.
+
+adds(load(Cargo,Plane,_),[in(Cargo,Plane)]).
+adds(unload(Cargo,_,Airport),[at(Cargo,Airport)]).
+adds(fly(Plane,_,To),[at(Plane,To)]).
+
+deletes(load(Cargo,_,Airport),[at(Cargo,Airport)]).
+deletes(unload(Cargo,Plane,_),[in(Cargo,Plane)]).
+deletes(fly(Plane,From,_),[at(Plane, From)]).
+
+object(X):-plane(X);cargo(X).
+impossible(1, 2).
+% Domain specific constraints
+%impossible(at(X, Airport), Goals) :-
+%    member(at(X, Other_Airport), Goals), Airport \== Other_Airport.
+%impossible(in(Cargo, Plane), Goals) :-
+%    member(in(Cargo, Other_Plane), Goals), Plane \== Other_Plane.
+
+% start([at(p1,jfk),at(p2,jfk),at(c1,jfk),at(c2,jfk)]).
+% bestfirst([at(c1,sfo),at(c2,tky)]-stop, Plan).
+start([at(p1,jfk),at(p2,jfk),at(c1,jfk),at(c2,jfk)]).
+plane(p1).
+plane(p2).
+cargo(c1).
+cargo(c2).
+airport(jfk).
+airport(sfo).
+airport(tky).
+
+cost(load(_,_), 1).
+cost(unload(_,_), 1).
+cost(fly(_, _, _), 10).
+% cost(fly(_, jfk, sfo), 100).
+% cost(fly(_, jfk, tky), 1000).
+% cost(fly(_, sfo, tky), 500).
+
+% cost(fly(_, sfo, jfk), 100).
+% cost(fly(_, tky, jfk), 1000).
+% cost(fly(_, tky, sfo), 500).
+
+

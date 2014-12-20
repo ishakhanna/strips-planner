@@ -1,0 +1,26 @@
+can(load(Cargo,Plane,Airport),[at(Cargo, Airport),at(Plane, Airport)]):- cargo(Cargo), plane(Plane), airport(Airport).
+can(unload(Cargo,Plane,Airport),[in(Cargo, Plane),at(Plane, Airport)]):- cargo(Cargo), plane(Plane), airport(Airport).
+can(fly(Plane,From,To),[at(Plane, From)]):- plane(Plane), airport(From), airport(To), To\==From.
+
+adds(load(Cargo,Plane,_),[in(Cargo,Plane)]).
+adds(unload(Cargo,_,Airport),[at(Cargo,Airport)]).
+adds(fly(Plane,_,To),[at(Plane,To)]).
+
+deletes(load(Cargo,_,Airport),[at(Cargo,Airport)]).
+deletes(unload(Cargo,Plane,_),[in(Cargo,Plane)]).
+deletes(fly(Plane,From,_),[at(Plane, From)]).
+
+plane(p1).
+plane(p2).
+
+cargo(c1).
+cargo(c2).
+cargo(c3).
+cargo(c4).
+
+airport(jfk).
+airport(sfo).
+airport(maa).
+airport(tky).
+
+object(X):-plane(X);cargo(X).

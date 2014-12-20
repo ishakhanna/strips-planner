@@ -1,0 +1,80 @@
+member( X, [X|_]).
+member( X, [_|Xs]) :- member( X, Xs).
+
+len([], 0).
+len([_|Xs], M) :- len(Xs, N), M is N + 1.
+
+conc( [], Y, Y).
+conc( [X|Xs], Y, [X|Zs]) :- conc( Xs, Y, Zs).
+
+delete_all( [], _, []).
+delete_all( [X|L1], L2, Diff) :- member( X, L2),!,delete_all( L1, L2, Diff).
+delete_all( [X|L1], L2, [X|Diff]) :- delete_all( L1, L2, Diff).
+
+satisfied( _, []).
+satisfied( State, [Goal|Goals]) :- member( Goal, State),satisfied( State, Goals).
+
+% select a goal that has not already been achieved
+select( State, Goals, Goal) :- member( Goal,Goals), \+ member( Goal,State).
+
+% what goals does this Action achieve?
+achieves( Action, Goal) :- adds( Action,Goals), member( Goal,Goals).
+
+% apply the action on State to give the successor state
+apply( State, Action, NewState) :- deletes( Action, DelList),
+	delete_all( State, DelList, State1),!,
+	adds( Action, AddList),
+	conc( AddList, State1, NewState).
+
+preserves( Action, Goals) :-
+    deletes( Action, Relations),
+    \+ ( member( Goal, Relations), member( Goal, Goals)).
+% means-end planner with goal regression
+plan( State, Goals, []) :-
+    satisfied( State, Goals).
+plan( State, Goals, Plan) :-
+    conc( PrePlan,[Action],Plan), % divide Plan into PrePlan and Action
+	select( State,Goals,Goal), % select a Goal and check if it can be solved by the Action
+	achieves( Action, Goal),
+    can( Action, _),
+    preserves( Action, Goals),
+    regress( Goals, Action, RegressedGoals), % Find a previous goals list that can be used to go back to
+	plan( State, RegressedGoals, PrePlan).
+
+regress( Goals, Action, RegressedGoals) :- % regress Goals through Action
+    adds( Action, NewRelations),
+    delete_all( Goals, NewRelations, RestGoals),
+    can( Action, Condition),
+    addnew( Condition, RestGoals, RegressedGoals).
+
+% addnew( NewGoals, OldGoals, AllGoals)
+% AllGoals is the union of the NewGoals and OldGoals
+addnew( [], L, L).
+addnew( [Goal|_], Goals, _) :-
+    impossible(Goal, Goals),
+    !,
+    fail.
+addnew( [X|L1], L2, L3) :- % ignore duplicates
+    member( X, L2), !,
+    addnew( L1, L2, L3).
+addnew( [X|L1], L2, [X|L3]) :-
+    addnew( L1, L2, L3).
+
+s( Goals - NextAction, NewGoals - Action, Cost) :-
+    member( Goal, Goals),
+    achieves( Action, Goal),
+    can( Action, Condition),
+    cost( Action, Cost),
+    preserves( Action, Goals),
+    regress( Goals, Action, NewGoals).
+
+goal( Goals - Action) :-
+    start( State),
+    satisfied( State, Goals).
+
+h( Goals - Action, H) :-
+    start( State),
+    delete_all( Goals, State, Unsatisfied),
+    len( Unsatisfied, H). % No. of unsatisfied goals
+
+

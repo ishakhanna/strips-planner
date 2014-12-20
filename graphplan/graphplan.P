@@ -1,0 +1,236 @@
+:- dynamic no_op_count/1.
+:- dynamic mutex_action/3.
+:- dynamic mutex_condition/3.
+:- dynamic plan_graph_del/3.
+:- dynamic plan_graph_add/3.
+:- dynamic plan_graph_pre/3.
+
+plan(InitialState, Goals, Plan) :-
+    reset_graph,
+    assert(init(InitialState)),
+    % add Initial state literals to Literal Level 0    
+    add_nodes(0, InitialState),
+    expand_graph(1, Goals, Steps),
+    search_graph(Steps, Goals, [], Plan),
+    nl, write(Plan), nl.
+
+% expand graph one level at a time until you reach a stage with literals satifying goals
+expand_graph(Stage, Goals, PrevStage) :-
+    Stage > 0,
+    PrevStage is Stage - 1,
+    % if previous stage contains Goals satified by nonmutex effects, return Steps
+    get_nonmutex_addconds(Goals, PrevStage, []), !.
+
+expand_graph(Stage, _, _) :- add_no_op_nodes(Stage), fail.
+
+expand_graph(Stage, _, _):-
+	can(Action, PreConditions),
+    deletes(Action, DelPreConditions),
+	adds(Action, AddConditions),	
+    PrevStage is Stage-1,
+	get_nonmutex_addconds(PreConditions, PrevStage, []),	
+    add_graph_nodes(PreConditions, Action, Stage, pre),
+	add_graph_nodes(DelPreConditions, Action, Stage, del),
+	add_graph_nodes(AddConditions, Action, Stage, add),
+	fail.
+
+expand_graph(Stage, Goals, Steps):-
+	mutex(Stage),
+	NextStage is Stage+1, !,
+	expand_graph(NextStage, Goals, Steps), !.
+
+% search_graph(Stage, Goals, PrevActions, Plan)
+% backward search to check if we're able to reach initial state from 
+% a Stage where Goals are possible
+% Plan: Set of Actions accrued through backward search
+search_graph(_, Goals, Tour, Plan) :- 
+    subset(Goals, State), init(State), 
+    remove_no_ops(Tour, Plan),!.
+search_graph(Stage, Goals, PrevActions, Plan) :-
+    find_action_set(Stage, Goals, [], Actions, []),     
+    extract_conditions(Stage, Actions, NewGoals),
+    PrevStage is Stage - 1,
+    append(Actions,PrevActions,NewPrevActions), 
+    search_graph(PrevStage, NewGoals, NewPrevActions, Plan).
+
+% find_action_set: Find a set of actions with add effects equal to Goals. They should not be exclusive with each other
+find_action_set(_, [], Actions, Actions, _).
+find_action_set(Stage, Goals, CurActions, PrevActions, PrevGoals):-
+	select_goal(Goals, Goal),
+	select_action(Stage, Goal, Action),
+	not( (member(OtherAction,CurActions), mutex_action(Stage, Action, OtherAction)) ),
+    extract_adds(Stage, Action, Adds),
+    not( (member(OtherAdds,PrevGoals), subset(Adds,OtherAdds), subset(OtherAdds,Adds)) ),
+	subtract(Goals, Adds, NewGoals),
+    append(Adds, PrevGoals, NewPrevGoals),
+	find_action_set(Stage, NewGoals, [Action|CurActions], PrevActions, NewPrevGoals).
+
+% select action with Goal as an addeffect.
+select_action(Stage, Literal, no_op(Action)):-
+	plan_graph(Stage, add, Literal, no_op(Action)).
+
+select_action(Stage, Literal, OtherAction):-
+	plan_graph(Stage, add, Literal, OtherAction),
+	OtherAction \= no_op(_).
+
+% choose a goal to add to list. similar to means-end analysis
+select_goal(Goals, Goal) :- 
+    % TBD Add heuristic function to select easily reachable goal    
+    member(Goal, Goals).
+% return list of effects for a list of actions
+extract_adds(Stage, Action, Adds) :-
+    findall(Condition, plan_graph(Stage, add, Condition, Action), Conditions),
+    list_to_set(Conditions, Adds). 
+% return list of pre-conditions for a list of actions
+extract_conditions(Stage, Actions, Literals) :-
+    findall(Cond,(member(Action,Actions), plan_graph(Stage, pre, Cond, Action)), PreConds),
+    list_to_set(PreConds, Literals).
+% return list of literals in Level
+conditions(Level, Conditions) :-
+    findall(X, node(Level, X), Conditions).
+
+% add list of literals to Stage
+add_nodes(_,[]).
+add_nodes(Stage, [Literal|Literals]) :-
+    add_plan_graph(Stage, add, Literal, stage0),
+    add_nodes(Stage, Literals).
+
+% return list of literals that are not exclusive with each other
+get_nonmutex_addconds([], _, _).
+get_nonmutex_addconds([Pred|Conditions], N, PrePreds):-
+	plan_graph(N, add, Pred, _),
+	check_mutex(PrePreds, Pred, N),
+	get_nonmutex_addconds(Conditions, N, [Pred|PrePreds]).
+
+check_mutex([], _, _).
+check_mutex([OtherPred|Others], Pred, N):-
+	not(mutex_condition(N, Pred, OtherPred)),
+	check_mutex(Others, Pred, N).
+
+% propagate mutex conditions in stage N
+mutex(N):-
+	mutex_add_del_conflict(N),
+	mutex_precond_conflict(N),
+	mutex_add_add_conflict(N).
+
+% interference mutex
+mutex_add_del_conflict(N):-
+	plan_graph(N, del, Pred, Action2),
+	( plan_graph(N, add, Pred, Action1); plan_graph(N, pre, Pred, Action1) ),
+	Action1 \= Action2,
+	insert_action_conflict(N, Action1, Action2),
+	fail.
+mutex_add_del_conflict(_).
+
+insert_action_conflict(N, Action1, Action2):-
+	add_to_db(mutex_action(N, Action1, Action2)),
+	add_to_db(mutex_action(N, Action2, Action1)).
+
+mutex_add_add_conflict(N):-
+	mutex_action(N, Action1, Action2),
+	plan_graph(N, add, Pred1, Action1),
+	plan_graph(N, add, Pred2, Action2),
+
+	Action1 \= Action2,
+	Pred1 \= Pred2,
+	not(mutex_condition(N, Pred1, Pred2)),
+	not( (
+	       plan_graph(N, add, Pred1, Action11),
+	       plan_graph(N, add, Pred2, Action22),
+	       Action11 \= Action22,
+	       not(mutex_action(N, Action11, Action22))
+	      )
+           ),
+	add_to_db(mutex_condition(N, Pred1, Pred2)),
+	add_to_db(mutex_condition(N, Pred2, Pred1)),
+	fail.
+mutex_add_add_conflict(_).
+
+% competing needs mutex
+mutex_precond_conflict(N):-
+	N1 is N-1,
+	mutex_condition(N1, Pred1, Pred2),
+	plan_graph(N, pre, Pred1, Action1),
+	plan_graph(N, pre, Pred2, Action2),
+	Action1 \= Action2,
+	insert_action_conflict(N, Action1, Action2),
+	fail.
+mutex_precond_conflict(_).
+
+plan_graph(N, del, Pred, Action):-
+	plan_graph_del(N, Pred, Action).
+	
+plan_graph(N, pre, Pred, Action):-
+	plan_graph_pre(N, Pred, Action).
+	
+plan_graph(N, add, Pred, Action):-
+	plan_graph_add(N, Pred, Action).
+
+add_plan_graph(N, del, Pred, Action):-
+	plan_graph_del(N, Pred, Action),!.
+add_plan_graph(N, del, Pred, Action):-
+	assert(plan_graph_del(N, Pred, Action)).
+add_plan_graph(N, pre, Pred, Action):-
+	plan_graph_pre(N, Pred, Action),!.
+add_plan_graph(N, pre, Pred, Action):-
+	assert(plan_graph_pre(N, Pred, Action)).
+add_plan_graph(N, add, Pred, Action):-
+	plan_graph_add(N, Pred, Action), !.
+add_plan_graph(N, add, Pred, Action):-
+	assert(plan_graph_add(N, Pred, Action)).
+
+add_graph_nodes([], _, _, _).
+add_graph_nodes([Pred|Conditions], Action, N, Type):-
+	add_plan_graph(N, Type, Pred, Action),
+	add_graph_nodes(Conditions, Action, N, Type).
+
+% add persistent nodes
+add_no_op_nodes(N):-
+	NPrev is N-1,
+	plan_graph(NPrev, add, Pred, _), % A proposition may exist at level i+1 if it is an add effect of an action in level i
+	add_no_op_node(Pred, N),
+	fail. % backtrack and add all adds proposition as a persistent node
+add_no_op_nodes(_).
+
+add_no_op_node(Pred, N):-
+    % same literal cannot be an effect and a pre-condition	
+    not((plan_graph(N, add, Pred, no_op(C)), plan_graph(N, pre, Pred, no_op(C)))),
+	new_no_op_count(Count),
+	add_plan_graph(N, add, Pred, no_op(Count)),
+	add_plan_graph(N, pre, Pred, no_op(Count)).
+
+new_no_op_count(N):-
+	retract(no_op_count(N)),
+	N1 is N+1,
+	assert(no_op_count(N1)).
+
+add_to_db(Clause):-
+	call(Clause),
+	!.
+add_to_db(Clause):-
+	assert(Clause).
+
+% remove_no_ops: remove persisted actions to eliminate redundancy
+remove_no_ops([],[]).
+remove_no_ops([no_op(_)|L],R):-
+	!,
+	remove_no_ops(L,R).
+remove_no_ops([stage0|L], R) :-
+    !,
+    remove_no_ops(L, R).
+remove_no_ops([X|L],[X1|R]):-
+	!,
+	remove_no_ops(X,X1),
+	remove_no_ops(L,R).
+remove_no_ops(X,X).
+
+% reset_graph: retracts all data from dynamic db
+reset_graph :-
+    retractall(no_op_count(_)),
+    retractall(init(_)),
+	retractall(mutex_action(_, _, _)),
+	retractall(mutex_condition(_, _, _)),
+	retractall(plan_graph_del(_, _, _)),
+	retractall(plan_graph_add(_, _, _)),
+	retractall(plan_graph_pre(_, _, _)),
+    assert(no_op_count(0)).
